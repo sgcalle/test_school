@@ -10,6 +10,7 @@ from odoo import models, fields, api
 from odoo.http import request
 from odoo.tools import DEFAULT_SERVER_DATE_FORMAT
 from odoo.exceptions import ValidationError
+from odoo.addons.payment.models.payment_acquirer import _partner_split_name
 
 from werkzeug import urls
 import requests
@@ -22,8 +23,8 @@ def get_customer_info(partner_id, country_id=False):
         country_id = partner_id.country_id
 
     return {
-        "firstName": partner_id.first_name or "",
-        "lastName": partner_id.last_name or "",
+        "firstName": "" if partner_id.is_company else _partner_split_name(partner_id.name)[0],
+        "lastName": partner_id.name if partner_id.is_company else _partner_split_name(partner_id.name)[1],
         "email": partner_id.email or "",
         "address1": partner_id.street[:40] if partner_id.street else "",
         "city": partner_id.city or "",
