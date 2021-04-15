@@ -55,16 +55,6 @@ class PaymentAcquirerBlumonpay(models.Model):
     _inherit = "payment.acquirer"
 
     _blumonpay_oauth_credentials = "blumon_pay_ecommerce_api:blumon_pay_ecommerce_api_password"
-    _blumonpay_api_base_urls = {
-        "enabled": {
-            "oauth": "https://sandbox-tokener.blumonpay.net/oauth/token",
-            "ecommerce": "https://sandbox-ecommerce.blumonpay.net/ecommerce/v2/charge"
-        },
-        "test": {
-            "oauth": "https://sandbox-tokener.blumonpay.net/oauth/token",
-            "ecommerce": "https://sandbox-ecommerce.blumonpay.net/ecommerce/v2/charge"
-        }
-    }
 
     ###################
     # Default methods #
@@ -91,6 +81,19 @@ class PaymentAcquirerBlumonpay(models.Model):
     blumonpay_access_token = fields.Char(
         "Blumon Pay Auth Access Token", default=None)
 
+    blumonpay_prod_auth_url = fields.Char("Production Auth URL",
+        groups="base.group_user",
+        help="The Production URL to use when authenticating.")
+    blumonpay_prod_ecommerce_url = fields.Char("Production eCommerce URL",
+        groups="base.group_user",
+        help="The Production URL to use when adding token or charging.")
+    blumonpay_sandbox_auth_url = fields.Char("Sandbox Auth URL",
+        groups="base.group_user",
+        help="The Sandbox URL to use when authenticating.")
+    blumonpay_sandbox_ecommerce_url = fields.Char("Sandbox eCommerce URL",
+        groups="base.group_user",
+        help="The Sandbox URL to use when adding token or charging.")
+
     ##############################
     # Compute and search methods #
     ##############################
@@ -115,10 +118,6 @@ class PaymentAcquirerBlumonpay(models.Model):
             "partner_id": int(data.get("partner_id"))
         })
 
-    def blumonpay_get_form_action_url(self):
-        self.ensure_one()
-        return self._blumonpay_api_base_urls[self.state]["ecommerce"]
-
     def blumonpay_s2s_form_validate(_, data):
         return all(
             [data.get(key)
@@ -128,36 +127,62 @@ class PaymentAcquirerBlumonpay(models.Model):
                     "cc_holder_name",
                     "cc_expiry",
                     "cc_cvc"]
-            ])
+             ])
 
     ####################
     # Business methods #
     ####################
+    def _get_blumonpay_url(self, action):
+        self.ensure_one()
+        default_auth_url = "https://sandbox-tokener.blumonpay.net/oauth/token"
+        default_ecommerce_url = "https://sandbox-ecommerce.blumonpay.net/ecommerce/v2/charge"
+        urls = {
+            "enabled": {
+                "oauth": self.blumonpay_prod_auth_url or default_auth_url,
+                "ecommerce": self.blumonpay_prod_ecommerce_url or default_ecommerce_url,
+            },
+            "test": {
+                "oauth": self.blumonpay_sandbox_auth_url or default_auth_url,
+                "ecommerce": self.blumonpay_sandbox_ecommerce_url or default_ecommerce_url,
+            }
+        }
+        return urls[self.state][action]
+
     def _blumonpay_request(self, url, headers=False, data=False, params=False, json=False, method="POST"):
         self.ensure_one()
 
-        response = requests.request(
-            method, url, data=data, json=json, params=params, headers=headers)
+        try:
+            response = requests.request(
+                method, url, data=data, json=json, params=params, headers=headers)
+            response.raise_for_status()
 
-        if not response.ok:
-            err_message = "%s: %s"
-            try:
-                response.raise_for_status()
-            except requests.exceptions.ConnectionError as errc:
-                err_message %= ("ConnectionError", str(errc))
-            except requests.exceptions.Timeout as errt:
-                err_message %= ("HTTPError", str(errt))
-            finally:
-                _logger.error(response.text)
-                raise BlumonpayError(err_message, response)
+            json = response.json()
 
-        return response
+            if json.get("error"):
+                raise BlumonpayError(json.get("error_description"), response)
+
+            return response
+        except requests.exceptions.ConnectionError as errc:
+            _logger.error(errc)
+            raise ValidationError("Blumon Pay: The server is down.")
+        except requests.exceptions.HTTPError as err:
+            _logger.error(err)
+
+            response = err.response
+
+            if "application/json" in response.headers.get("Content-Type"):
+                json = response.json()
+
+                if json.get("error"):
+                    raise BlumonpayError("Blumon Pay: %s: %s" % (
+                        json.get("error"), json.get("error_description")), response)
+
+            raise ValidationError("An HTTP error has occurred: %s." % str(err))
 
     def _blumonpay_oauth_request(self, url, **kwargs):
         self.ensure_one()
 
-        url = urls.url_join(
-            self._blumonpay_api_base_urls[self.state]["oauth"], url)
+        url = urls.url_join(self._get_blumonpay_url("oauth"), url)
         headers = kwargs.get("headers", {
             "Authorization": "Basic %s" % base64_encode(self._blumonpay_oauth_credentials)
         })
@@ -180,7 +205,7 @@ class PaymentAcquirerBlumonpay(models.Model):
         if eager_refresh or not self.blumonpay_access_token:
             self._blumonpay_refresh_access_token()
 
-        base_url = self.blumonpay_get_form_action_url()
+        base_url = self._get_blumonpay_url("ecommerce")
 
         url = urls.url_join(base_url, url)
         headers = kwargs.get("headers", {
@@ -210,9 +235,11 @@ class PaymentAcquirerBlumonpay(models.Model):
                     return self._blumonpay_ecommerce_request(url, retries=retries, **kwargs)
 
             err = res_json.get("error", "Error")
-            err_description = res_json.get(
-                "error_description", "Something is wrong with the request")
-            raise ValidationError("%s: %s" % (err, err_description))
+            err_code = err.get("httpStatusCode", 400)
+            err_description = err.get(
+                "description", "Something is wrong with the request")
+            raise ValidationError("Blumonpay Error: %s %s" %
+                                  (err_code, err_description))
 
     def _blumonpay_refresh_access_token(self):
         self.ensure_one()
@@ -264,7 +291,7 @@ class PaymentTransactionBlumonpay(models.Model):
     _inherit = "payment.transaction"
 
     _blumonpay_supported_currencies_map = {
-        "MXN": 484
+        "MXN": 484,
     }
 
     ###################
@@ -292,7 +319,8 @@ class PaymentTransactionBlumonpay(models.Model):
     ##################
     def blumonpay_s2s_do_transaction(self, **kwargs):
         if self.currency_id.name not in self._blumonpay_supported_currencies_map.keys():
-            raise ValidationError("Currency %s not supported." % self.currency_id.name)
+            raise ValidationError(
+                "Currency %s not supported." % self.currency_id.name)
 
         payment_token = self.payment_token_id
         acquirer = self.acquirer_id
@@ -391,7 +419,8 @@ class PaymentTokenBlumonpay(models.Model):
                 })
                 return vals
             else:
-                raise ValidationError("Error: %s" % response.get("error", {}).get("description", ""))
+                raise ValidationError("Error: %s" % response.get(
+                    "error", {}).get("description", ""))
 
         return {}
 

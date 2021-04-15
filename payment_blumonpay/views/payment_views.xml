@@ -6,10 +6,16 @@
             <field name="model">payment.acquirer</field>
             <field name="inherit_id" ref="payment.acquirer_form"/>
             <field name="arch" type="xml">
-                <xpath expr='//group[@name="acquirer"]' position='inside'>
+                <xpath expr="//page[@name='acquirer_credentials']" position="inside">
                     <group attrs="{'invisible': [('provider', '!=', 'blumonpay')]}">
-                        <field name="blumonpay_username" attrs="{'required':[ ('provider', '=', 'blumonpay'), ('state', '!=', 'disabled')]}"/>
-                        <field name="blumonpay_password" attrs="{'required':[ ('provider', '=', 'blumonpay'), ('state', '!=', 'disabled')]}"/>
+                        <field name="blumonpay_username" attrs="{'required':[('provider', '=', 'blumonpay'), ('state', '!=', 'disabled')]}"/>
+                        <field name="blumonpay_password" attrs="{'required':[('provider', '=', 'blumonpay'), ('state', '!=', 'disabled')]}"/>
+                        <separator string="Production URLs" colspan="2"/>
+                        <field name="blumonpay_prod_auth_url" placeholder="default: https://sandbox-tokener.blumonpay.net/oauth/token"/>
+                        <field name="blumonpay_prod_ecommerce_url" placeholder="default: https://sandbox-ecommerce.blumonpay.net/ecommerce/v2/charge"/>
+                        <separator string="Sandbox URLs" colspan="2"/>
+                        <field name="blumonpay_sandbox_auth_url" placeholder="default: https://sandbox-tokener.blumonpay.net/oauth/token"/>
+                        <field name="blumonpay_sandbox_ecommerce_url" placeholder="default: https://sandbox-ecommerce.blumonpay.net/ecommerce/v2/charge"/>
                     </group>
                 </xpath>
             </field>
