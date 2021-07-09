@@ -1,0 +1,3 @@
+[submodule "l10n-spain"]
+	path = l10n-spain
+	url = git@github.com:OCA/l10n-spain.git
